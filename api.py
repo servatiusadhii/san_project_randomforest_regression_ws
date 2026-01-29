@@ -75,6 +75,57 @@ def predict():
 
 
 # =========================
+# PREDICTION ALL REQUEST (MODEL TERBARU)
+# =========================
+@app.route("/train_predict", methods=["POST"])
+def train_predict():
+    req = request.get_json()
+
+    dataset = req.get("dataset")
+    training = req.get("training")
+    predict_input = req.get("predict")  # fitur untuk prediksi
+
+    if not dataset or not training or not predict_input:
+        return jsonify({
+            "status": "error",
+            "message": "dataset / training / predict tidak lengkap"
+        }), 400
+
+    # TRAINING
+    result = train_model(dataset, training)
+
+    # LOAD MODEL TERBARU
+    model = load_model()
+
+    if model is None:
+        return jsonify({
+            "status": "error",
+            "message": "Model belum tersedia"
+        }), 400
+
+    # PREDIKSI
+    try:
+        fitur = np.array([[
+            float(predict_input["jumlah_ayam"]),
+            float(predict_input["pakan_total_kg"]),
+            float(predict_input["kematian"]),
+            float(predict_input["afkir"])
+        ]])
+    except Exception:
+        return jsonify({"status": "error", "message": "Predict input tidak valid"}), 400
+
+    prediksi = model.predict(fitur)
+
+    return jsonify({
+        "status": "success",
+        "MAE": result["MAE"],
+        "RMSE": result["RMSE"],
+        "R2": result["R2"],
+        "prediksi_telur_kg": round(float(prediksi[0]), 2)
+    })
+
+
+# =========================
 # HEALTH CHECK
 # =========================
 @app.route("/", methods=["GET"])
