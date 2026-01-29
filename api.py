@@ -1,141 +1,92 @@
 from flask import Flask, request, jsonify
-import pickle
+import pandas as pd
 import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import pickle
 import os
-
-from train_model import train_model  # ⬅️ PENTING
 
 app = Flask(__name__)
 
-MODEL_PATH = "model_telur.pkl"
+def train_model(dataset, training_params):
+    df = pd.DataFrame(dataset)
 
+    # bersihin kolom yang ga dipakai
+    df = df[["pakan_total_kg", "kematian", "afkir", "telur_kg"]]
 
-# =========================
-# Helper: load model
-# =========================
-def load_model():
-    if not os.path.exists(MODEL_PATH):
-        return None
-    with open(MODEL_PATH, "rb") as f:
-        return pickle.load(f)
+    # convert
+    df["pakan_total_kg"] = df["pakan_total_kg"].astype(float)
+    df["kematian"] = df["kematian"].astype(int)
+    df["afkir"] = df["afkir"].astype(int)
+    df["telur_kg"] = df["telur_kg"].astype(float)
 
+    X = df.drop("telur_kg", axis=1)
+    y = df["telur_kg"]
 
-# =========================
-# TRAIN MODEL (DARI LARAVEL)
-# =========================
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=training_params["random_state"]
+    )
+
+    model = RandomForestRegressor(
+        n_estimators=training_params["n_estimators"],
+        random_state=training_params["random_state"],
+        max_depth=training_params["max_depth"]
+    )
+
+    model.fit(X_train, y_train)
+
+    # save model
+    with open("model_telur.pkl", "wb") as f:
+        pickle.dump(model, f)
+
+    # metrics
+    pred = model.predict(X_test)
+    mae = mean_absolute_error(y_test, pred)
+    rmse = mean_squared_error(y_test, pred, squared=False)
+    r2 = r2_score(y_test, pred)
+
+    return model, mae, rmse, r2
+
 @app.route("/train", methods=["POST"])
 def train():
-    req = request.get_json()
-
-    if not req:
-        return jsonify({"error": "Request JSON kosong"}), 400
-
-    dataset = req.get("dataset")
-    training = req.get("training")
-
-    if not dataset or not training:
-        return jsonify({"error": "Dataset atau training parameter tidak lengkap"}), 400
-
-    try:
-        result = train_model(dataset, training)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
-
-
-# =========================
-# PREDICT (MODEL TERBARU)
-# =========================
-@app.route("/predict", methods=["POST"])
-def predict():
-    model = load_model()
-    if model is None:
-        return jsonify({"error": "Model belum ditraining"}), 400
-
     data = request.get_json()
 
-    try:
-        fitur = np.array([[
-            int(data["jumlah_ayam"]),
-            float(data["pakan_total_kg"]),
-            int(data["kematian"]),
-            int(data["afkir"])
-        ]])
-    except Exception:
-        return jsonify({"error": "Parameter tidak valid"}), 400
+    dataset = data.get("dataset")
+    training_params = data.get("training")
+    predict_input = data.get("predict")
 
-    prediksi = model.predict(fitur)
+    if dataset is None or training_params is None:
+        return jsonify({"status": "error", "message": "dataset / training missing"}), 400
 
-    return jsonify({
-        "prediksi_telur_kg": round(float(prediksi[0]), 2)
-    })
+    # training
+    model, mae, rmse, r2 = train_model(dataset, training_params)
 
-
-# =========================
-# PREDICTION ALL REQUEST (MODEL TERBARU)
-# =========================
-@app.route("/train_predict", methods=["POST"])
-def train_predict():
-    req = request.get_json()
-
-    dataset = req.get("dataset")
-    training = req.get("training")
-    predict_input = req.get("predict")  # fitur untuk prediksi
-
-    if not dataset or not training or not predict_input:
-        return jsonify({
-            "status": "error",
-            "message": "dataset / training / predict tidak lengkap"
-        }), 400
-
-    # TRAINING
-    result = train_model(dataset, training)
-
-    # LOAD MODEL TERBARU
-    model = load_model()
-
-    if model is None:
-        return jsonify({
-            "status": "error",
-            "message": "Model belum tersedia"
-        }), 400
-
-    # PREDIKSI
-    try:
-        fitur = np.array([[
-            float(predict_input["jumlah_ayam"]),
+    # prediksi jika ada input
+    if predict_input:
+        fitur = np.array([[ 
             float(predict_input["pakan_total_kg"]),
-            float(predict_input["kematian"]),
-            float(predict_input["afkir"])
+            int(predict_input["kematian"]),
+            int(predict_input["afkir"])
         ]])
-    except Exception:
-        return jsonify({"status": "error", "message": "Predict input tidak valid"}), 400
 
-    prediksi = model.predict(fitur)
+        prediksi = model.predict(fitur)
+        prediksi_telur_kg = round(float(prediksi[0]), 2)
+    else:
+        prediksi_telur_kg = None
 
     return jsonify({
         "status": "success",
-        "MAE": result["MAE"],
-        "RMSE": result["RMSE"],
-        "R2": result["R2"],
-        "prediksi_telur_kg": round(float(prediksi[0]), 2)
+        "MAE": round(mae, 2),
+        "RMSE": round(rmse, 2),
+        "R2": round(r2, 2),
+        "prediksi_telur_kg": prediksi_telur_kg
     })
 
 
-# =========================
-# HEALTH CHECK
-# =========================
 @app.route("/", methods=["GET"])
 def home():
-    return "🚀 API Random Forest Telur Aktif"
-
+    return "API Telur Siap"
 
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),
-        debug=True
-    )
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
