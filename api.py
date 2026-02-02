@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify
 import pandas as pd
 import numpy as np
 import pickle
-import os
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -28,20 +27,20 @@ def train():
             if c not in df.columns:
                 return jsonify({"status": "error", "message": f"Kolom '{c}' tidak ditemukan"}), 400
 
-        # ================= Feature Engineering
+        # Feature engineering
         df["pakan_per_ayam"] = df["pakan_total_kg"] / df["jumlah_ayam"]
         X = df[["jumlah_ayam", "pakan_per_ayam", "kematian", "afkir"]]
         y = df["telur_kg"]
 
-        # ================= Training params
+        # Training params
         n_estimators = int(training.get("n_estimators", 150))
         random_state = int(training.get("random_state", 42))
         max_depth = training.get("max_depth", 6)
 
-        # ================= Split data
+        # Split data
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=random_state)
 
-        # ================= Train model
+        # Model
         model = RandomForestRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -52,29 +51,29 @@ def train():
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
 
-        # ================= Evaluasi
-        avg_ayam = X_test["jumlah_ayam"].mean()
+        # Evaluasi
         MAE = mean_absolute_error(y_test, y_pred)
         MSE = mean_squared_error(y_test, y_pred)
         RMSE = np.sqrt(MSE)
-        # Per ayam
+        R2 = r2_score(y_test, y_pred)
+
+        avg_ayam = X_test["jumlah_ayam"].mean()
         MAE_per_ayam = MAE / avg_ayam
         MSE_per_ayam = MSE / (avg_ayam ** 2)
         RMSE_per_ayam = RMSE / avg_ayam
-        R2 = r2_score(y_test, y_pred)
 
-        # ================= Prediksi harian/bulanan
-        total_ayam = df["jumlah_ayam"].sum()
+        # Prediksi ringkasan
         harian_telur_kg = y.mean()
         bulanan_telur_kg = y.sum()
         telur_per_ayam = harian_telur_kg / df["jumlah_ayam"].mean()
-        harian_telur_butir = harian_telur_kg / 0.06  # asumsi 1 telur = 60 gram
+        harian_telur_butir = harian_telur_kg / 0.06  # 1 telur ≈ 60 gr
         bulanan_telur_butir = bulanan_telur_kg / 0.06
 
-        # ================= Save model
+        # Save model
         with open("model_telur.pkl", "wb") as f:
             pickle.dump(model, f)
 
+        # Final JSON output
         return jsonify({
             "status": "success",
             "MAE_kg": round(MAE, 3),
@@ -83,7 +82,7 @@ def train():
             "MAE_per_ayam": round(MAE_per_ayam, 6),
             "MSE_per_ayam": round(MSE_per_ayam, 6),
             "RMSE_per_ayam": round(RMSE_per_ayam, 6),
-            "R2": round(R2, 3),
+            "R2": round(float(R2), 3),
             "Train_rows": len(X_train),
             "Test_rows": len(X_test),
             "Features_used": list(X.columns),
@@ -91,8 +90,8 @@ def train():
                 "harian_telur_kg": round(harian_telur_kg, 2),
                 "bulanan_telur_kg": round(bulanan_telur_kg, 2),
                 "telur_per_ayam": round(telur_per_ayam, 4),
-                "harian_telur_butir": round(harian_telur_butir),
-                "bulanan_telur_butir": round(bulanan_telur_butir)
+                "harian_telur_butir": int(round(harian_telur_butir)),
+                "bulanan_telur_butir": int(round(bulanan_telur_butir))
             }
         })
 
@@ -106,4 +105,4 @@ def home():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=True)
