@@ -9,7 +9,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 def train_model(dataset, training_params):
     """
     dataset: list of dict (dari Laravel)
-    training_params: dict (n_estimators, random_state, max_depth)
+    training_params: dict (optional)
     """
 
     # =====================
@@ -17,24 +17,47 @@ def train_model(dataset, training_params):
     # =====================
     df = pd.DataFrame(dataset)
 
-    # sesuaikan kolom target
-    y = df["telur_kg"]      # atau telur_butir
-    X = df.drop([
-        "telur_kg",
-        "created_at",
-        "updated_at",
-        "catatan"
-    ], axis=1, errors="ignore")
+    # pastikan kolom wajib ada
+    required_cols = [
+        "jumlah_ayam",
+        "pakan_total_kg",
+        "kematian",
+        "afkir",
+        "id_kandang",
+        "telur_kg"
+    ]
+
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Kolom '{col}' tidak ditemukan di dataset")
 
     # =====================
-    # 2. Training params
+    # 2. Feature Engineering (ANTI BOCOR)
     # =====================
-    n_estimators = training_params.get("n_estimators", 100)
+    # normalisasi pakan (lebih realistis)
+    df["pakan_per_ayam"] = df["pakan_total_kg"] / df["jumlah_ayam"]
+
+    # target
+    y = df["telur_kg"]
+
+    # fitur FINAL (AMAN)
+    X = df[[
+        "jumlah_ayam",
+        "pakan_per_ayam",
+        "kematian",
+        "afkir",
+        "id_kandang"
+    ]]
+
+    # =====================
+    # 3. Training params
+    # =====================
+    n_estimators = training_params.get("n_estimators", 150)
     random_state = training_params.get("random_state", 42)
-    max_depth = training_params.get("max_depth")
+    max_depth = training_params.get("max_depth", 6)
 
     # =====================
-    # 3. Split data
+    # 4. Split data
     # =====================
     X_train, X_test, y_train, y_test = train_test_split(
         X,
@@ -44,18 +67,20 @@ def train_model(dataset, training_params):
     )
 
     # =====================
-    # 4. Model
+    # 5. Model (ANTI OVERFIT)
     # =====================
     model = RandomForestRegressor(
         n_estimators=n_estimators,
-        random_state=random_state,
-        max_depth=max_depth
+        max_depth=max_depth,
+        min_samples_leaf=5,
+        min_samples_split=10,
+        random_state=random_state
     )
 
     model.fit(X_train, y_train)
 
     # =====================
-    # 5. Evaluasi
+    # 6. Evaluasi
     # =====================
     y_pred = model.predict(X_test)
 
@@ -63,18 +88,25 @@ def train_model(dataset, training_params):
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     r2 = r2_score(y_test, y_pred)
 
+    # akurasi persentase (interpretatif, bukan sklearn default)
+    accuracy_pct = 100 - (mae / y_test.mean() * 100)
+
     # =====================
-    # 6. Save model
+    # 7. Save model
     # =====================
     with open("model_telur.pkl", "wb") as f:
         pickle.dump(model, f)
 
     # =====================
-    # 7. Return hasil
+    # 8. Return hasil
     # =====================
     return {
         "status": "success",
-        "MAE": round(mae, 2),
-        "RMSE": round(rmse, 2),
-        "R2": round(r2, 2)
+        "MAE (kg)": round(mae, 2),
+        "RMSE (kg)": round(rmse, 2),
+        "R2": round(r2, 3),
+        "Accuracy (%)": round(accuracy_pct, 2),
+        "Train_rows": len(X_train),
+        "Test_rows": len(X_test),
+        "Features_used": list(X.columns)
     }
