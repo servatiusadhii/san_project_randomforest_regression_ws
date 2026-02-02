@@ -108,18 +108,77 @@ def train():
             pickle.dump(model, f)
 
         # =====================
-        # 8. Response
+        # 8. PREDIKSI (PAKAI DATA TERAKHIR)
+        # =====================
+        last_row = df.iloc[-1:]
+
+        X_last = last_row[[
+            "jumlah_ayam",
+            "pakan_per_ayam",
+            "kematian",
+            "afkir",
+        ]]
+
+        pred_harian_kg = float(model.predict(X_last)[0])
+        pred_bulanan_kg = pred_harian_kg * 30
+
+        # =====================
+        # 9. TELUR PER AYAM (KG)
+        # =====================
+        avg_jumlah_ayam = df["jumlah_ayam"].mean()
+        telur_per_ayam = pred_harian_kg / avg_jumlah_ayam
+
+        # =====================
+        # 10. HITUNG BERAT TELUR PER BUTIR (DATA HISTORIS)
+        # =====================
+        # kg telur per ayam per hari
+        df["telur_per_ayam_kg"] = df["telur_kg"] / df["jumlah_ayam"]
+
+        # estimasi berat telur (kg / butir) dari konsistensi data
+        avg_telur_per_ayam_kg = df["telur_per_ayam_kg"].mean()
+        produksi_rate = df["telur_kg"].sum() / df["jumlah_ayam"].sum()
+
+        berat_telur_kg = avg_telur_per_ayam_kg / produksi_rate
+
+        # safety net (anti NaN / 0)
+        if berat_telur_kg <= 0 or np.isnan(berat_telur_kg):
+            berat_telur_kg = 0.06  # fallback TERAKHIR (jarang kepake)
+
+        # =====================
+        # 11. KONVERSI KE BUTIR
+        # =====================
+        pred_harian_butir = pred_harian_kg / berat_telur_kg
+        pred_bulanan_butir = pred_harian_butir * 30
+
+        # =====================
+        # 12. AKURASI PER AYAM
+        # =====================
+        mae_per_ayam = mae / avg_jumlah_ayam
+        mse_per_ayam = mean_squared_error(y_test, y_pred) / (avg_jumlah_ayam ** 2)
+        rmse_per_ayam = np.sqrt(mse_per_ayam)
+
+        # =====================
+        # 13. RESPONSE FINAL (1:1 DENGAN LARAVEL)
         # =====================
         return jsonify({
             "status": "success",
-            "MAE_kg": round(float(mae), 2),
-            "RMSE_kg": round(float(rmse), 2),
-            "R2": round(float(r2), 3),
-            "Accuracy_%": round(float(accuracy_pct), 2),
-            "Train_rows": len(X_train),
-            "Test_rows": len(X_test),
-            "Features_used": list(X.columns)
+
+            "prediksi": {
+                "harian_telur_kg": round(pred_harian_kg, 2),
+                "bulanan_telur_kg": round(pred_bulanan_kg, 2),
+                "telur_per_ayam": round(telur_per_ayam, 4),
+                "harian_telur_butir": int(round(pred_harian_butir)),
+                "bulanan_telur_butir": int(round(pred_bulanan_butir)),
+            },
+
+            "akurasi": {
+                "MAE_per_ayam": round(mae_per_ayam, 4),
+                "MSE_per_ayam": round(mse_per_ayam, 4),
+                "RMSE_per_ayam": round(rmse_per_ayam, 4),
+                "R2": round(float(r2), 3),
+            }
         })
+
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
