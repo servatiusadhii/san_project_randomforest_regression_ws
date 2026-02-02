@@ -39,7 +39,6 @@ def train():
             "pakan_total_kg",
             "kematian",
             "afkir",
-            "id_kandang",
             "telur_kg"
         ]
 
@@ -60,7 +59,6 @@ def train():
             "pakan_per_ayam",
             "kematian",
             "afkir",
-            "id_kandang"
         ]]
 
         y = df["telur_kg"]
